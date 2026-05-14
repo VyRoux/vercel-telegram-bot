@@ -8,7 +8,7 @@ app.post('/webhook', (req, res) => {
     console.log('🔄 Update bot terdeteksi...');
     
     // Command: masuk folder, tarik kode, install deps, lalu restart bot
-    const command = 'cd ~/nama-repo-bot && git pull origin main && npm install && pm2 restart telegram-bot';
+    const command = 'cd ~/bot-hp && git pull origin master && npm install && pm2 restart bot-hp';
 
     exec(command, (err, stdout, stderr) => {
         if (err) return res.status(500).send('Deploy Gagal');
