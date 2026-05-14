@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import botHandler from './api/bot.js';
 
