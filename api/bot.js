@@ -54,4 +54,4 @@ bot.command('help', async (ctx) => {
     `/help  - Bantuan ini`)
 })
 
-export default webhookCallback(bot, 'http')
+export default bot
