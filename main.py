@@ -1,9 +1,10 @@
 """
 MulyonoW Bot — Telegram Utility Bot
-Entry point untuk local dev (polling) & production (webhook via aiohttp).
+Entry point untuk local dev (polling) & production (webhook via ASGI).
 """
 
 import asyncio
+import json
 import logging
 import os
 
@@ -46,19 +47,14 @@ logger = logging.getLogger(__name__)
 # ── Telegram Application ───────────────────────────────────────────────
 ptb_app = Application.builder().token(BOT_TOKEN).build()
 
-# Admin
 ptb_app.add_handler(CommandHandler("admin", admin_command))
 ptb_app.add_handler(CommandHandler("stats", stats_command))
 ptb_app.add_handler(CommandHandler("broadcast", broadcast_command))
 ptb_app.add_handler(CommandHandler("ban", ban_command))
 ptb_app.add_handler(CommandHandler("unban", unban_command))
 ptb_app.add_handler(CommandHandler("addadmin", addadmin_command))
-
-# Bug Report
 ptb_app.add_handler(CommandHandler("report", report_command))
 ptb_app.add_handler(CommandHandler("bug", bug_command))
-
-# Utilities
 ptb_app.add_handler(CommandHandler("start", start))
 ptb_app.add_handler(CommandHandler("help", help_command))
 ptb_app.add_handler(CommandHandler("qr", qr_command))
@@ -76,31 +72,61 @@ ptb_app.add_handler(CommandHandler("ip", ip_command))
 
 WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 
-# ── Vercel / Production: aiohttp app (top-level) ──────────────────────
-from aiohttp import web
 
-async def health(request):
-    return web.json_response({"status": "ok", "bot": "MulyonoW"})
+# ── ASGI App (for Vercel) ──────────────────────────────────────────────
+async def send_response(send, status, body, content_type="text/plain"):
+    await send({"type": "http.response.start", "status": status,
+                "headers": [[b"content-type", content_type.encode()]],
+                "trailers": False})
+    await send({"type": "http.response.body", "body": body.encode()})
 
-async def webhook(request):
-    try:
-        data = await request.json()
-        update = Update.de_json(data, ptb_app.bot)
-        await ptb_app.process_update(update)
-    except Exception as e:
-        logger.error(f"Error: {e}")
-    return web.Response(text="ok")
 
-async def set_wh(request):
-    base = str(request.url).split("/set-webhook")[0]
-    url = base + WEBHOOK_PATH
-    result = await ptb_app.bot.set_webhook(url=url)
-    return web.json_response({"ok": result, "url": url})
+async def app(scope, receive, send):
+    if scope["type"] != "http":
+        return
 
-app = web.Application()
-app.router.add_get("/", health)
-app.router.add_get("/set-webhook", set_wh)
-app.router.add_post(WEBHOOK_PATH, webhook)
+    path = scope["path"]
+    method = scope["method"]
+
+    # Read body for POST requests
+    body = b""
+    if method == "POST":
+        while True:
+            msg = await receive()
+            body += msg.get("body", b"")
+            if not msg.get("more_body", False):
+                break
+
+    # Health check
+    if path == "/" and method == "GET":
+        resp = json.dumps({"status": "ok", "bot": "MulyonoW"})
+        await send_response(send, 200, resp, "application/json")
+
+    # Set webhook
+    elif path == "/set-webhook" and method == "GET":
+        raw_path = scope.get("raw_path", b"").decode() or path
+        qs = scope.get("query_string", b"").decode()
+        base = f"https://{scope['server'][0]}" if scope.get("server") else ""
+        url = base + WEBHOOK_PATH
+        try:
+            result = await ptb_app.bot.set_webhook(url=url)
+            resp = json.dumps({"ok": result, "url": url})
+        except Exception as e:
+            resp = json.dumps({"ok": False, "error": str(e)})
+        await send_response(send, 200, resp, "application/json")
+
+    # Webhook
+    elif path == WEBHOOK_PATH and method == "POST":
+        try:
+            data = json.loads(body)
+            update = Update.de_json(data, ptb_app.bot)
+            await ptb_app.process_update(update)
+        except Exception as e:
+            logger.error(f"Webhook error: {e}")
+        await send_response(send, 200, "ok")
+
+    else:
+        await send_response(send, 404, "Not found")
 
 
 # ── Local Development (polling) ────────────────────────────────────────
@@ -119,4 +145,5 @@ if __name__ == "__main__":
     if ENV == "development":
         asyncio.run(run_local())
     else:
-        web.run_app(app, host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
+        import uvicorn
+        uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
