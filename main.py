@@ -104,10 +104,9 @@ async def app(scope, receive, send):
 
     # Set webhook
     elif path == "/set-webhook" and method == "GET":
-        raw_path = scope.get("raw_path", b"").decode() or path
-        qs = scope.get("query_string", b"").decode()
-        base = f"https://{scope['server'][0]}" if scope.get("server") else ""
-        url = base + WEBHOOK_PATH
+        headers = dict(scope.get("headers", []))
+        host = headers.get(b"host", b"localhost").decode()
+        url = f"https://{host}{WEBHOOK_PATH}"
         try:
             result = await ptb_app.bot.set_webhook(url=url)
             resp = json.dumps({"ok": result, "url": url})
