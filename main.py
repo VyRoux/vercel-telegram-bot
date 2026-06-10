@@ -74,6 +74,17 @@ WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 
 
 # ── ASGI App (for Vercel) ──────────────────────────────────────────────
+_bot_initialized = False
+
+async def _ensure_initialized():
+    global _bot_initialized
+    if not _bot_initialized:
+        await ptb_app.initialize()
+        await ptb_app.start()
+        _bot_initialized = True
+        logger.info("Bot initialized for webhook mode")
+
+
 async def send_response(send, status, body, content_type="text/plain"):
     await send({"type": "http.response.start", "status": status,
                 "headers": [[b"content-type", content_type.encode()]],
@@ -104,6 +115,7 @@ async def app(scope, receive, send):
 
     # Set webhook
     elif path == "/set-webhook" and method == "GET":
+        await _ensure_initialized()
         headers = dict(scope.get("headers", []))
         host = headers.get(b"host", b"localhost").decode()
         url = f"https://{host}{WEBHOOK_PATH}"
@@ -116,6 +128,7 @@ async def app(scope, receive, send):
 
     # Webhook
     elif path == WEBHOOK_PATH and method == "POST":
+        await _ensure_initialized()
         try:
             data = json.loads(body)
             update = Update.de_json(data, ptb_app.bot)
